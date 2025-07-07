@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const mysql = require('mysql');
 
 const pool = mysql.createPool({
