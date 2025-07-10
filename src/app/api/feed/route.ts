@@ -2,11 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/utils/db';
 import { verifyToken } from '@/utils/auth';
 
-interface DecodedToken {
-  userId: number;
-  gender: string;
-}
-
 export async function GET(req: NextRequest) {
   try {
     const authHeader = req.headers.get('authorization');
@@ -14,8 +9,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'No token provided' }, { status: 401 });
     }
     const token = authHeader.replace('Bearer ', '');
-    const decoded = verifyToken(token) as DecodedToken;
-    // const userId = decoded.userId; // Not used
+    verifyToken(token); // Only verify, don't assign
 
     // Get recent posts with user info
     const posts = await query(`
