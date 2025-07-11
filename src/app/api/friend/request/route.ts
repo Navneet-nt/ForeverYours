@@ -7,6 +7,21 @@ interface DecodedToken {
   gender: string;
 }
 
+interface Friend {
+  id: number;
+  user1Id: number;
+  user2Id: number;
+  since: string;
+}
+
+interface FriendRequest {
+  id: number;
+  fromUserId: number;
+  toUserId: number;
+  status: string;
+  createdAt: string;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { toUserId } = await req.json();
@@ -26,7 +41,7 @@ export async function POST(req: NextRequest) {
     const friends = await query(
       'SELECT * FROM Friends WHERE (user1Id = ? AND user2Id = ?) OR (user1Id = ? AND user2Id = ?)',
       [fromUserId, toUserId, toUserId, fromUserId]
-    );
+    ) as Friend[];
     if (friends.length > 0) {
       return NextResponse.json({ error: 'Already friends' }, { status: 400 });
     }
@@ -35,7 +50,7 @@ export async function POST(req: NextRequest) {
     const requests = await query(
       'SELECT * FROM FriendRequests WHERE fromUserId = ? AND toUserId = ? AND status = "pending"',
       [fromUserId, toUserId]
-    );
+    ) as FriendRequest[];
     if (requests.length > 0) {
       return NextResponse.json({ error: 'Request already sent' }, { status: 400 });
     }

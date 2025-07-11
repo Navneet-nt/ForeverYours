@@ -7,6 +7,14 @@ interface DecodedToken {
   gender: string;
 }
 
+interface FriendRequest {
+  id: number;
+  fromUserId: number;
+  toUserId: number;
+  status: string;
+  createdAt: string;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { requestId, accept } = await req.json();
@@ -22,7 +30,7 @@ export async function POST(req: NextRequest) {
     const requests = await query(
       'SELECT * FROM FriendRequests WHERE id = ? AND toUserId = ? AND status = "pending"',
       [requestId, userId]
-    );
+    ) as FriendRequest[];
     if (!requests.length) {
       return NextResponse.json({ error: 'Request not found' }, { status: 404 });
     }

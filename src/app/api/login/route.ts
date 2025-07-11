@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     if (!email || !password) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
     }
-    const users: User[] = await query('SELECT * FROM Users WHERE email = ?', [email]);
+    const users = await query('SELECT * FROM Users WHERE email = ?', [email]) as User[];
     if (!users.length) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }

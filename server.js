@@ -1,199 +1,157 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const next = require('next');
-const cors = require('cors');
-const helmet = require('helmet');
-const { query } = require('./src/utils/db');
-const { verifyToken } = require('./src/utils/auth');
+// server.js
+const express = require('express')
+const http = require('http')
+const { Server } = require('socket.io')
+const next = require('next')
+const cors = require('cors')
+const helmet = require('helmet')
+const { query } = require('./src/utils/db')
+const { verifyToken } = require('./src/utils/auth')
 
-const dev = process.env.NODE_ENV !== 'production';
-const app = next({ dev });
-const handle = app.getRequestHandler();
+const dev = process.env.NODE_ENV !== 'production'
+const app = next({ dev })
+const handle = app.getRequestHandler()
 
-// Matching queues
+// In‑memory match queues
 const matchQueue = {
   male: [],
   female: [],
-  
   addToQueue(userId, gender) {
-    if (gender === 'M') {
-      this.male.push(userId);
-    } else {
-      this.female.push(userId);
-    }
+    if (gender === 'M') this.male.push(userId)
+    else this.female.push(userId)
   },
-  
   removeFromQueue(userId) {
-    this.male = this.male.filter(id => id !== userId);
-    this.female = this.female.filter(id => id !== userId);
+    this.male = this.male.filter(id => id !== userId)
+    this.female = this.female.filter(id => id !== userId)
   },
-  
   findMatch(userId, gender) {
-    const oppositeQueue = gender === 'M' ? this.female : this.male;
-    if (oppositeQueue.length > 0) {
-      const partnerId = oppositeQueue.shift();
-      return partnerId;
-    }
-    return null;
+    const opposite = gender === 'M' ? this.female : this.male
+    return opposite.length ? opposite.shift() : null
   }
-};
+}
 
 app.prepare().then(() => {
-  const server = express();
-  server.use(cors());
-  server.use(helmet());
+  const server = express()
+  server.use(cors())
+  server.use(helmet())
 
-  const httpServer = http.createServer(server);
+  const httpServer = http.createServer(server)
   const io = new Server(httpServer, {
-    cors: {
-      origin: '*',
-      methods: ['GET', 'POST']
-    }
-  });
+    cors: { origin: '*', methods: ['GET','POST'] }
+  })
 
-  // Store user data
-  const userSessions = new Map(); // socketId -> { userId, sessionId, gender }
+  // socket.id → { userId, sessionId, gender }
+  const userSessions = new Map()
 
-  // WebSocket event handlers
-  io.on('connection', (socket) => {
-    console.log('New client connected, id=', socket.id);
-    
-    let userId = null;
-    let sessionId = null;
-    let gender = null;
+  io.on('connection', socket => {
+    console.log('New client:', socket.id)
 
-    // Authenticate user
-    socket.on('authenticate', async (token) => {
+    let userId = null
+    let sessionId = null
+    let gender = null
+
+    socket.on('authenticate', token => {
       try {
-        const decoded = verifyToken(token);
-        userId = decoded.userId;
-        gender = decoded.gender;
-        userSessions.set(socket.id, { userId, sessionId, gender });
-        console.log(`User ${userId} authenticated`);
-      } catch (err) {
-        console.error('Authentication failed:', err.message);
+        const decoded = verifyToken(token)
+        userId = decoded.userId
+        gender = decoded.gender
+        userSessions.set(socket.id, { userId, sessionId, gender })
+        console.log(`Authenticated user ${userId}`)
+      } catch (e) {
+        console.error('Auth failed:', e.message)
       }
-    });
+    })
 
-    // Join session
-    socket.on('joinSession', async (data) => {
+    socket.on('joinSession', async ({ sessionId: sid }) => {
       try {
-        sessionId = data.sessionId;
-        userSessions.set(socket.id, { userId, sessionId, gender });
-        socket.join(sessionId);
-        
-        // Notify others in session
-        socket.to(sessionId).emit('userJoined', { userId, gender });
-        console.log(`User ${userId} joined session ${sessionId}`);
-      } catch (err) {
-        console.error('Join session failed:', err.message);
+        sessionId = sid
+        userSessions.set(socket.id, { userId, sessionId, gender })
+        socket.join(sessionId)
+        socket.to(sessionId).emit('userJoined', { userId, gender })
+        console.log(`User ${userId} joined session ${sessionId}`)
+      } catch (e) {
+        console.error('Join session failed:', e.message)
       }
-    });
+    })
 
-    // Chat message
-    socket.on('chatMessage', async (message) => {
+    socket.on('chatMessage', async message => {
+      if (!sessionId) return
       try {
-        if (!sessionId) return;
-        
-        // Save to database
         await query(
           'INSERT INTO Messages (sessionId, senderId, content) VALUES (?, ?, ?)',
           [sessionId, userId, message]
-        );
-        
-        // Broadcast to session
-        io.to(sessionId).emit('chatMessage', { 
-          userId, 
-          message, 
-          timestamp: new Date().toISOString() 
-        });
-      } catch (err) {
-        console.error('Chat message failed:', err.message);
+        )
+        io.to(sessionId).emit('chatMessage', {
+          userId,
+          message,
+          timestamp: new Date().toISOString()
+        })
+      } catch (e) {
+        console.error('Chat message failed:', e.message)
       }
-    });
+    })
 
-    // Drawing event
-    socket.on('draw', (strokeData) => {
-      if (!sessionId) return;
-      
-      // Broadcast to others in session
-      socket.to(sessionId).emit('draw', strokeData);
-    });
+    socket.on('draw', strokeData => {
+      if (sessionId) socket.to(sessionId).emit('draw', strokeData)
+    })
 
-    // Music control
-    socket.on('musicControl', (event) => {
-      if (!sessionId) return;
-      
-      // Broadcast to session
-      io.to(sessionId).emit('musicControl', { userId, ...event });
-    });
+    socket.on('musicControl', event => {
+      if (sessionId) io.to(sessionId).emit('musicControl', { userId, ...event })
+    })
 
-    // Find match
     socket.on('findMatch', async () => {
+      if (!userId || !gender) return
       try {
-        if (!userId || !gender) return;
-        
-        const partnerId = matchQueue.findMatch(userId, gender);
-        
+        const partnerId = matchQueue.findMatch(userId, gender)
         if (partnerId) {
-          // Create session
-          const result = await query('INSERT INTO Sessions (creatorId) VALUES (?)', [userId]);
-          const newSessionId = result.insertId;
-          
-          // Add both users to session
-          await query('INSERT INTO SessionParticipants (sessionId, userId) VALUES (?, ?)', [newSessionId, userId]);
-          await query('INSERT INTO SessionParticipants (sessionId, userId) VALUES (?, ?)', [newSessionId, partnerId]);
-          
-          // Notify both users
-          io.to(userId.toString()).emit('matchFound', { sessionId: newSessionId });
-          io.to(partnerId.toString()).emit('matchFound', { sessionId: newSessionId });
-          
-          console.log(`Match created: ${userId} and ${partnerId} in session ${newSessionId}`);
-        } else {
-          // Add to queue
-          matchQueue.addToQueue(userId, gender);
-          socket.emit('waitingForMatch');
-          console.log(`User ${userId} added to ${gender} queue`);
-        }
-      } catch (err) {
-        console.error('Find match failed:', err.message);
-      }
-    });
+          // create session
+          const result = await query(
+            'INSERT INTO Sessions (creatorId) VALUES (?)',
+            [userId]
+          )
+          const newSessionId = result.insertId
 
-    // Cancel match search
+          // add both participants
+          await query(
+            'INSERT INTO SessionParticipants (sessionId, userId) VALUES (?, ?), (?, ?)',
+            [newSessionId, userId, newSessionId, partnerId]
+          )
+
+          io.to(userId.toString()).emit('matchFound', { sessionId: newSessionId })
+          io.to(partnerId.toString()).emit('matchFound', { sessionId: newSessionId })
+          console.log(`Match created: ${userId} & ${partnerId} in session ${newSessionId}`)
+        } else {
+          // wait in queue
+          matchQueue.addToQueue(userId, gender)
+          socket.emit('waitingForMatch')
+          console.log(`User ${userId} added to ${gender} queue`)
+        }
+      } catch (e) {
+        console.error('Find match failed:', e.message)
+      }
+    })
+
     socket.on('cancelMatch', () => {
       if (userId) {
-        matchQueue.removeFromQueue(userId);
-        socket.emit('matchCancelled');
-        console.log(`User ${userId} cancelled match search`);
+        matchQueue.removeFromQueue(userId)
+        socket.emit('matchCancelled')
+        console.log(`User ${userId} cancelled match search`)
       }
-    });
+    })
 
-    // Disconnect
-    socket.on('disconnect', async () => {
-      console.log('Client disconnected', socket.id);
-      
-      // Remove from match queue
-      if (userId) {
-        matchQueue.removeFromQueue(userId);
-      }
-      
-      // Leave session
-      if (sessionId) {
-        socket.to(sessionId).emit('userLeft', { userId });
-      }
-      
-      // Clean up
-      userSessions.delete(socket.id);
-    });
-  });
+    socket.on('disconnect', () => {
+      console.log('Client disconnected', socket.id)
+      if (userId) matchQueue.removeFromQueue(userId)
+      if (sessionId) socket.to(sessionId).emit('userLeft', { userId })
+      userSessions.delete(socket.id)
+    })
+  })
 
-  // Next.js page handling
-  server.all('*', (req, res) => handle(req, res));
+  // Let Next.js handle all other routes
+  server.all('*', (req, res) => handle(req, res))
 
-  const PORT = process.env.PORT || 3000;
+  const PORT = process.env.PORT || 3000
   httpServer.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
-}); 
+    console.log(`Server running on http://localhost:${PORT}`)
+  })
+})

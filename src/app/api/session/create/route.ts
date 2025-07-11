@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/utils/db';
 import { verifyToken } from '@/utils/auth';
 
+interface InsertResult {
+  insertId: number;
+}
+
 interface DecodedToken {
   userId: number;
   gender: string;
@@ -17,7 +21,7 @@ export async function POST(req: NextRequest) {
     const decoded = verifyToken(token) as DecodedToken;
     const userId = decoded.userId;
 
-    const result = await query('INSERT INTO Sessions (creatorId) VALUES (?)', [userId]);
+    const result = await query('INSERT INTO Sessions (creatorId) VALUES (?)', [userId]) as InsertResult;
     const sessionId = result.insertId;
     const inviteLink = `${process.env.NEXT_PUBLIC_BASE_URL}/join?sessionId=${sessionId}`;
 

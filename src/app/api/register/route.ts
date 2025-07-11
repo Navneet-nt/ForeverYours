@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/utils/db';
 import { signToken, hashPassword } from '@/utils/auth';
 
-interface DecodedToken {
-  userId: number;
+interface User {
+  id: number;
+  email: string;
   gender: string;
 }
 
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
       [username, email, pwdHash, gender]
     );
     // Get the new user's ID
-    const users = await query('SELECT id FROM Users WHERE email = ?', [email]);
+    const users = await query('SELECT id, email, gender FROM Users WHERE email = ?', [email]) as User[];
     const user = users[0];
     const token = signToken({ userId: user.id, gender });
     return NextResponse.json({ token });
